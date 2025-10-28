@@ -1,0 +1,83 @@
+# Idea 1. SegFormer Teacher + CNN / Mamba Student with Frequency Attention
+
+이미지를 **주파수 영역으로 변환(Fourier Transform)**했을 때
+
+- **저주파**: 큰 덩어리, 전체적인 구조, 전역적 맥락 → 배경·윤곽
+- **고주파**: 경계, 디테일, 작은 변화 → 텍스처·엣지
+
+이는 곧 딥러닝 네트워크에서
+- **High Level Feature**: 의미 단위, 전역적 정보, semantic 구조 → 저주파와 유사
+- **Low Level Feature**: 간단한 패턴, 엣지, 국소 구조 → 고주파와 유사
+
+즉, 서로 유사한 구조를 담는다.
+
+**SegFormer**는 Global Self-Attention 구조로 전역 정보 + 지역 정보에 모두 강하지만, **CNN**은 깊이가 얕거나 모델의 크기가 작을 때 국소적 패턴에 치우치고 전역 정보를 잘 담아내지 못한다.
+
+따라서, CNN이 Teacher Model인 SegFormer와 같은 결과를 도출하기 위해서는 지식 증류 과정에서 전역 정보를 효과적으로 전달받아야 한다.
+
+**가설: "전역 정보를 주파수를 바탕으로 한 Attention Map을 바탕으로 더 효과적으로 전달한다."**
+
+---
+
+## Fast-SCNN
+
+대표적인 경량 CNN 모델인 Fast SCNN의 구조를 살펴보고, 해당 가설을 바탕으로 전략을 구성한다.
+
+---
+
+해상도를 맞추기 위해 **고속 푸리에 변환**을 활용한다.
+
+## 1. 기본 전략
+
+**Encoder (Downsampling & Global Context)**
+- 입력 이미지를 빠르게 축소하여 전역 문맥 정보를 추출
+
+개선 방법: **저주파 성분(전역 구조, Semantic) 을 강조하는 Attention Map**을 **Encoder**에 적용
+- 이를 통해 Student(Fast-SCNN)가 Teacher(SegFormer)의 전역적 표현을 더 잘 모방하도록 유도
+- Encoder 단계에서는 **LPF(Low-Pass Filter) 기반 KD**
+
+**Decoder (Feature Fusion & Upsampling)**
+- Encoder의 전역 Feature와 초기 단계의 Low Level Feature 융합 → Segmentation Mask
+
+개선 방법: **고주파 성분(경계, 디테일, 텍스처) 을 강조하는 Attention Map**을 **Decoder**에 적용
+- 이를 통해 경량 CNN이 잃기 쉬운 세밀한 경계 정보를 Teacher로부터 효과적으로 전달
+- Decoder 단계에서는 **HPF(High-Pass Filter) 기반 KD**
+
+기대 효과: SegFormer 수준의 표현력을 일부 흡수 → 실시간성 + 정확도 확보
+
+--- 
+
+## 2. 역전 전략 (반대로 적용)
+
+**Encoder에 HPF 적용** → 저해상도 Feature에서도 경계·고주파 강조
+**Decoder에 LPF 적용** → 복원 과정에서 전역 Semantic 강조
+
+---
+
+
+## 3. 필터의 위치
+
+1. Teacher에만 HPF + LPF
+2. Student에만 HPF + LPF
+3. Teacher + Student 모두 HPF + LPF
+
+---
+
+한 가지의 주파수 필터만 적용하는 게 아닌, 하이퍼파라미터를 지정해서 LPF, HPF의 비율을 조정하는 방식으로도 활용할 수 있다.
+
+손실 함수의 예시를 GPT와 함께 만들어 보았다.
+
+**(1) 기본 전략**
+![](https://velog.velcdn.com/images/tmddn0920/post/1d623b9c-d159-46e5-8a7b-aba1c3864e5d/image.png)
+
+**(2) Student 모델에만 필터 적용**
+![](https://velog.velcdn.com/images/tmddn0920/post/330761a9-c0f8-427d-8dc2-ff4908189d8a/image.png)
+
+**(3) 하이퍼파라미터를 바탕으로 LBF, HPF의 비율 조정**
+
+![](https://velog.velcdn.com/images/tmddn0920/post/ac3bd8dc-42a6-4821-a83b-7b81e4670314/image.png)
+
+**최종 손실 함수**
+![](https://velog.velcdn.com/images/tmddn0920/post/7f4691f5-3644-4d88-b18e-5280ce4a6227/image.png)
+
+---
